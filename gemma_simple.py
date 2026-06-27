@@ -2,44 +2,63 @@
 Usage:
   python gemma_simple.py tt35027300
   python gemma_simple.py tt35027300 --lang Hindi --quality 1080
-  python gemma_simple.py https://gemma416okl.com/play/tt35027300
 """
 
-import re, sys, json, base64, requests, argparse
+import re, sys, os, json, base64, requests, argparse, random
 from urllib.parse import quote
 
-S = requests.Session()
-S.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-})
-
-# ── try multiple known base domains in case one is down
-BASES = [
-    "https://gemma416okl.com",
-    "https://www.gemma416okl.com",
+PROXIES = [
+    ("31.59.20.176",    6754),
+    ("31.56.127.193",   7684),
+    ("45.38.107.97",    6014),
+    ("38.154.203.95",   5863),
+    ("198.105.121.200", 6462),
+    ("64.137.96.74",    6641),
+    ("198.23.243.226",  6361),
+    ("38.154.185.97",   6370),
+    ("142.111.67.146",  5611),
+    ("191.96.254.138",  6185),
 ]
+PROXY_USER = "ygxmhkcc"
+PROXY_PASS = "n3batopqanpg"
+
+BASE = "https://gemma416okl.com"
+UA   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
 
-def find_base(imdb_id):
-    """Try each base domain and return the first that responds."""
-    for base in BASES:
-        url = f"{base}/play/{imdb_id}"
+def make_session(host, port):
+    proxy_url = f"http://{PROXY_USER}:{PROXY_PASS}@{host}:{port}"
+    s = requests.Session()
+    s.proxies = {"http": proxy_url, "https": proxy_url}
+    s.headers.update({
+        "User-Agent": UA,
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+    })
+    return s
+
+
+def get_working_session(imdb_id):
+    proxy_list = PROXIES.copy()
+    random.shuffle(proxy_list)
+    for host, port in proxy_list:
+        print(f"[*] Trying proxy {host}:{port} ...", flush=True)
         try:
-            r = S.get(url, timeout=15, allow_redirects=True)
-            print(f"[*] Trying {url}  →  HTTP {r.status_code}")
+            s = make_session(host, port)
+            r = s.get(f"{BASE}/play/{imdb_id}", timeout=15)
+            print(f"    HTTP {r.status_code}", flush=True)
             if r.status_code == 200:
-                return base, url, r.text
+                print(f"[+] Connected via {host}:{port}", flush=True)
+                return s, r.text
         except Exception as e:
-            print(f"[!] {base} failed: {e}")
-    return None, None, None
+            print(f"    failed: {e}", flush=True)
+    return None, None
 
 
-def post(url, token, referer):
-    r = S.post(url, data="", headers={
+def post(s, url, token, referer):
+    r = s.post(url, data="", headers={
         "X-CSRF-Token": token,
-        "Origin": referer.split("/play/")[0],
+        "Origin": BASE,
         "Referer": referer,
         "Content-Type": "application/x-www-form-urlencoded",
         "sec-fetch-dest": "empty",
@@ -73,18 +92,16 @@ def variants(m3u8, base_url):
 
 
 def extract(imdb_id, lang_filter="", quality_filter="ALL"):
-    # Step 1: find working domain + load page
-    base, referer, html = find_base(imdb_id)
+    S, html = get_working_session(imdb_id)
     if not html:
-        print("[-] All domains returned 404 or failed.")
-        print("    The site may be down, blocked by GitHub's IP, or the domain changed.")
+        print("[-] All proxies failed.")
         sys.exit(1)
 
-    # Step 2: parse player config
+    referer = f"{BASE}/play/{imdb_id}"
+
     m = re.search(r'let\s+p3\s*=\s*(\{.+?\});', html, re.DOTALL)
     if not m:
-        # dump first 500 chars for debugging
-        print("[-] Player config (let p3 = {...}) not found.")
+        print("[-] Player config not found.")
         print(f"[debug] Page snippet:\n{html[:500]}")
         sys.exit(1)
 
@@ -93,11 +110,9 @@ def extract(imdb_id, lang_filter="", quality_filter="ALL"):
     print(f"[+] Token : {token[:30]}...")
     print(f"[+] File  : {file_path[:60]}...")
 
-    # Step 3: track list
-    tracks = json.loads(post(file_path, token, referer))
-    print(f"[+] {len(tracks)} track(s) found: {[t.get('title') for t in tracks]}")
+    tracks = json.loads(post(S, file_path, token, referer))
+    print(f"[+] {len(tracks)} track(s): {[t.get('title') for t in tracks]}")
 
-    # Step 4: per track → stream URLs
     results = []
     for t in tracks:
         if not t.get("file"):
@@ -106,13 +121,13 @@ def extract(imdb_id, lang_filter="", quality_filter="ALL"):
         if lang_filter and lang_filter.lower() not in lang.lower():
             continue
 
-        fp  = t["file"]
-        pl  = (fp[1:] + ".txt") if fp.startswith("~") else (fp if fp.startswith("http") else fp + ".txt")
-        pl_url = f"{base}/playlist/{quote(pl, safe='')}" if not pl.startswith("http") else pl
+        fp     = t["file"]
+        pl     = (fp[1:] + ".txt") if fp.startswith("~") else (fp if fp.startswith("http") else fp + ".txt")
+        pl_url = f"{BASE}/playlist/{quote(pl, safe='')}" if not pl.startswith("http") else pl
 
-        print(f"\n[*] Track '{lang}' → {pl_url[:60]}...")
+        print(f"\n[*] Track '{lang}'", flush=True)
         try:
-            raw = post(pl_url, token, referer).strip()
+            raw = post(S, pl_url, token, referer).strip()
         except Exception as e:
             print(f"  [-] POST failed: {e}")
             continue
@@ -122,20 +137,19 @@ def extract(imdb_id, lang_filter="", quality_filter="ALL"):
             all_vars = variants(raw, pl_url)
         elif raw.startswith("http"):
             m3u8_url = raw.splitlines()[0]
-            print(f"  [*] Fetching master: {m3u8_url[:60]}...")
             try:
-                master = S.get(m3u8_url, headers={"Referer": base+"/", "Origin": base}, timeout=15).text
+                master = S.get(m3u8_url, headers={"Referer": BASE+"/", "Origin": BASE}, timeout=15).text
                 all_vars = variants(master, m3u8_url)
             except Exception as e:
                 print(f"  [-] Master fetch failed: {e}")
         else:
-            print(f"  [-] Unexpected response: {raw[:100]}")
+            print(f"  [-] Unexpected: {raw[:100]}")
 
         for bw, res, stream_url in all_vars:
             if quality_filter != "ALL" and f"/{quality_filter}/" not in stream_url:
                 continue
             results.append((lang, res, bw, stream_url))
-            print(f"  [+] {lang:<10} {res:<12} {bw//1000:>4}k  {stream_url}")
+            print(f"  [+] {lang:<10} {res:<12} {bw//1000:>4}k")
 
     return results
 
