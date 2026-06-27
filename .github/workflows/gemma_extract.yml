@@ -58,25 +58,25 @@ jobs:
             --quality "${{ inputs.quality }}" \
             | tee output.txt
 
-          # grab best URL for summary
           BEST=$(grep "BEST:" output.txt | sed 's/BEST: //' || true)
           echo "best_url=$BEST" >> "$GITHUB_OUTPUT"
 
       - name: Write job summary
         run: |
-          echo "## 🎬 Stream Extraction — \`${{ inputs.imdb_id }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎬 \`${{ inputs.imdb_id }}\` — Stream Extraction" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Input | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| IMDB ID | \`${{ inputs.imdb_id }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Language filter | ${{ inputs.language || 'ALL' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Quality | ${{ inputs.quality }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| IMDB ID  | \`${{ inputs.imdb_id }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Language | ${{ inputs.language || 'ALL' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Quality  | ${{ inputs.quality }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ -n "${{ steps.extract.outputs.best_url }}" ]; then
+          BEST=$(grep "BEST:" output.txt | sed 's/BEST: //' || true)
+          if [ -n "$BEST" ]; then
             echo "### ✅ Best Stream URL" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            echo "${{ steps.extract.outputs.best_url }}" >> $GITHUB_STEP_SUMMARY
+            echo "$BEST" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           else
             echo "### ❌ No stream URLs found" >> $GITHUB_STEP_SUMMARY
