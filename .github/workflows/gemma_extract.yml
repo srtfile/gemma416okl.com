@@ -1,0 +1,98 @@
+name: Extract Stream URLs (Gemma)
+
+on:
+  workflow_dispatch:
+    inputs:
+      imdb_id:
+        description: "IMDB ID (e.g. tt35027300)"
+        required: true
+        type: string
+
+      language:
+        description: "Filter by language (leave empty for ALL)"
+        required: false
+        default: ""
+        type: choice
+        options:
+          - ""
+          - Hindi
+          - Bengali
+          - Tamil
+          - Telugu
+          - English
+
+      quality:
+        description: "Preferred quality"
+        required: false
+        default: "1080"
+        type: choice
+        options:
+          - "1080"
+          - "720"
+          - "480"
+          - "360"
+          - "ALL"
+
+jobs:
+  extract:
+    name: Extract Stream URLs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run extractor
+        id: extract
+        run: |
+          python gemma_simple.py "${{ inputs.imdb_id }}" \
+            --lang "${{ inputs.language }}" \
+            --quality "${{ inputs.quality }}" \
+            | tee output.txt
+
+          # grab best URL for summary
+          BEST=$(grep "BEST:" output.txt | sed 's/BEST: //' || true)
+          echo "best_url=$BEST" >> "$GITHUB_OUTPUT"
+
+      - name: Write job summary
+        run: |
+          echo "## 🎬 Stream Extraction — \`${{ inputs.imdb_id }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Input | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| IMDB ID | \`${{ inputs.imdb_id }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Language filter | ${{ inputs.language || 'ALL' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Quality | ${{ inputs.quality }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -n "${{ steps.extract.outputs.best_url }}" ]; then
+            echo "### ✅ Best Stream URL" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "${{ steps.extract.outputs.best_url }}" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ No stream URLs found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<details><summary>📋 Full output</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          cat output.txt >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: streams-${{ inputs.imdb_id }}
+          path: output.txt
+          retention-days: 7
